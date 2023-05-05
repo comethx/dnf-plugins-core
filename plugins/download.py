@@ -243,25 +243,35 @@ class DownloadCommand(dnf.cli.Command):
                     logger.error(_("Exiting due to strict setting."))
                     raise dnf.exceptions.Error(e)
 
-        pkgs = list(itertools.chain(*queries))
+        pkg_dict = {}
+        for query in queries:
+            for pkg in query:
+                key = (pkg.name, pkg.evr, pkg.arch)
+                if key not in pkg_dict:
+                    pkg_dict[key] = pkg
+
+        pkgs = list(pkg_dict.values())
         return pkgs
 
     def _get_packages_with_deps(self, pkg_specs, source=False):
         """Get packages matching pkg_specs and the deps."""
         pkgs = self._get_packages(pkg_specs)
         pkg_set = set(pkgs)
-        for pkg in pkgs:
-            goal = hawkey.Goal(self.base.sack)
+        goal = hawkey.Goal(self.base.sack)
+
+        for pkg in pkg_set:
             goal.install(pkg)
-            rc = goal.run()
-            if rc:
-                pkg_set.update(goal.list_installs())
-                pkg_set.update(goal.list_upgrades())
-            else:
-                msg = [_('Error in resolve of packages:')]
-                logger.warning("\n    ".join(msg + [str(pkg) for pkg in pkgs]))
-                logger.warning(dnf.util._format_resolve_problems(goal.problem_rules()))
-                return []
+
+        rc = goal.run(ignore_weak_deps=(not self.base.conf.install_weak_deps))
+        if rc:
+            pkg_set.update(goal.list_installs())
+            pkg_set.update(goal.list_upgrades())
+        else:
+            msg = [_('Error in resolve of packages:')]
+            logger.error("\n    ".join(msg + [str(pkg) for pkg in pkgs]))
+            logger.error(dnf.util._format_resolve_problems(goal.problem_rules()))
+            raise dnf.exceptions.Error()
+
         return pkg_set
 
     @staticmethod
